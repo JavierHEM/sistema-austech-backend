@@ -13,6 +13,7 @@ import historialRoutes from './routes/historial.routes.js';
 import reportesRoutes from './routes/reportes.routes.js';
 import busquedaRoutes from './routes/busqueda.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
+import usuariosRoutes from './routes/usuarios.routes.js';
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use('/api/historial', historialRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/busqueda', busquedaRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/usuarios', usuariosRoutes);
 
 // Ruta de prueba
 app.get('/api/health', (req, res) => {
