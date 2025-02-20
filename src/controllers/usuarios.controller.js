@@ -1,71 +1,68 @@
 // src/controllers/usuarios.controller.js
 import supabase from '../utils/supabase.js';
 
+// Obtener todos los usuarios
 export const getUsuarios = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data: usuarios, error } = await supabase
       .from('usuarios')
-      .select('id, nombre, email, rol, estado, created_at')
-      .order('nombre');
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    if (error) throw error;
-
-    res.json(data);
-  } catch (error) {
-    console.error('Error al obtener usuarios:', error);
-    res.status(500).json({
-      message: 'Error al obtener usuarios',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
-
-export const getUsuarioById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('id, nombre, email, rol, estado, created_at')
-      .eq('id', id)
-      .single();
-
-    if (error) throw error;
-
-    if (!data) {
-      return res.status(404).json({
-        message: 'Usuario no encontrado'
+    if (error) {
+      console.error('Error al obtener usuarios:', error);
+      return res.status(500).json({
+        message: 'Error al obtener la lista de usuarios'
       });
     }
 
-    res.json(data);
+    res.json(usuarios);
   } catch (error) {
-    console.error('Error al obtener usuario:', error);
+    console.error('Error en getUsuarios:', error);
     res.status(500).json({
-      message: 'Error al obtener usuario',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error en el servidor'
     });
   }
 };
 
+// Obtener un usuario por ID
+export const getUsuarioById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { data: usuario, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({
+          message: 'Usuario no encontrado'
+        });
+      }
+      console.error('Error al obtener usuario:', error);
+      return res.status(500).json({
+        message: 'Error al obtener información del usuario'
+      });
+    }
+
+    res.json(usuario);
+  } catch (error) {
+    console.error('Error en getUsuarioById:', error);
+    res.status(500).json({
+      message: 'Error en el servidor'
+    });
+  }
+};
+
+// Crear un nuevo usuario
 export const createUsuario = async (req, res) => {
   try {
     const { nombre, email, password, rol } = req.body;
 
-    // Validación básica
-    if (!nombre || !email || !password || !rol) {
-      return res.status(400).json({
-        message: 'Nombre, email, password y rol son requeridos'
-      });
-    }
-
-    // Verificar que el rol sea válido
-    if (!['GERENTE', 'OPERARIO'].includes(rol)) {
-      return res.status(400).json({
-        message: 'Rol inválido. Debe ser GERENTE o OPERARIO'
-      });
-    }
-
-    // 1. Primero crear el usuario en Auth
+    // Primero, crear usuario en Authentication
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -73,21 +70,20 @@ export const createUsuario = async (req, res) => {
     });
 
     if (authError) {
+      console.error('Error al crear usuario en Auth:', authError);
       return res.status(400).json({
-        message: 'Error al crear usuario en autenticación',
-        error: process.env.NODE_ENV === 'development' ? authError.message : undefined
+        message: authError.message
       });
     }
 
-    // 2. Luego crear el registro en la tabla usuarios
-    const { data, error } = await supabase
+    // Luego, guardar datos del usuario en la tabla usuarios
+    const { data: userData, error: userError } = await supabase
       .from('usuarios')
       .insert([
-        { 
+        {
           id: authData.user.id,
-          nombre, 
+          nombre,
           email,
-          password: 'password_hash', // No almacenamos la contraseña real
           rol,
           estado: true
         }
@@ -95,143 +91,149 @@ export const createUsuario = async (req, res) => {
       .select()
       .single();
 
-    if (error) {
-      // Si falla la inserción en la tabla, intentar eliminar el usuario de Auth
+    if (userError) {
+      console.error('Error al guardar datos de usuario:', userError);
+      // Intentar eliminar el usuario de Auth si falla
       await supabase.auth.admin.deleteUser(authData.user.id);
-      throw error;
+      return res.status(500).json({
+        message: 'Error al crear usuario'
+      });
     }
 
-    res.status(201).json({
-      id: data.id,
-      nombre: data.nombre,
-      email: data.email,
-      rol: data.rol,
-      estado: data.estado
-    });
+    res.status(201).json(userData);
   } catch (error) {
-    console.error('Error al crear usuario:', error);
+    console.error('Error en createUsuario:', error);
     res.status(500).json({
-      message: 'Error al crear usuario',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error en el servidor al crear usuario'
     });
   }
 };
 
+// Actualizar un usuario
 export const updateUsuario = async (req, res) => {
   try {
     const { id } = req.params;
     const { nombre, email, rol, estado } = req.body;
 
-    // Validación básica
-    if (!nombre || !email || !rol) {
-      return res.status(400).json({
-        message: 'Nombre, email y rol son requeridos'
-      });
-    }
-
-    // Verificar que el rol sea válido
-    if (!['GERENTE', 'OPERARIO'].includes(rol)) {
-      return res.status(400).json({
-        message: 'Rol inválido. Debe ser GERENTE o OPERARIO'
-      });
-    }
-
-    // Actualizar usuario en tabla usuarios
-    const { data, error } = await supabase
+    // Actualizar datos en la tabla usuarios
+    const { data: userData, error: userError } = await supabase
       .from('usuarios')
-      .update({ 
-        nombre,
-        email,
-        rol,
-        estado: estado === undefined ? true : estado,
-        updated_at: new Date().toISOString()
-      })
+      .update({ nombre, email, rol, estado })
       .eq('id', id)
       .select()
       .single();
 
-    if (error) throw error;
-
-    if (!data) {
-      return res.status(404).json({
-        message: 'Usuario no encontrado'
+    if (userError) {
+      console.error('Error al actualizar usuario:', userError);
+      return res.status(500).json({
+        message: 'Error al actualizar usuario'
       });
     }
 
-    // Si cambia el email, actualizar también en Auth
-    const usuarioActual = await supabase
-      .from('usuarios')
-      .select('email')
-      .eq('id', id)
-      .single();
-
-    if (usuarioActual.data && usuarioActual.data.email !== email) {
-      await supabase.auth.admin.updateUserById(id, {
+    // Si se cambió el correo, actualizarlo también en Auth
+    if (email && email !== userData.email) {
+      const { error: authError } = await supabase.auth.admin.updateUserById(id, {
         email
       });
+
+      if (authError) {
+        console.error('Error al actualizar email en Auth:', authError);
+        // No fallamos la operación completa, solo registramos el error
+      }
     }
 
-    res.json({
-      id: data.id,
-      nombre: data.nombre,
-      email: data.email,
-      rol: data.rol,
-      estado: data.estado
-    });
+    res.json(userData);
   } catch (error) {
-    console.error('Error al actualizar usuario:', error);
+    console.error('Error en updateUsuario:', error);
     res.status(500).json({
-      message: 'Error al actualizar usuario',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error en el servidor al actualizar usuario'
     });
   }
 };
 
+// Eliminar un usuario
 export const deleteUsuario = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Soft delete: actualizar estado a false
-    const { data, error } = await supabase
-      .from('usuarios')
-      .update({ 
-        estado: false,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    if (!data) {
-      return res.status(404).json({
-        message: 'Usuario no encontrado'
+    // Verificar que no se elimine a sí mismo
+    if (id === req.user.id) {
+      return res.status(400).json({
+        message: 'No puedes eliminar tu propio usuario'
       });
     }
 
-    res.json({ message: 'Usuario desactivado correctamente' });
+    // Eliminar de la tabla usuarios
+    const { error: userError } = await supabase
+      .from('usuarios')
+      .delete()
+      .eq('id', id);
 
-    // No eliminamos el usuario de Auth, solo lo desactivamos en nuestra tabla
+    if (userError) {
+      console.error('Error al eliminar usuario de la tabla:', userError);
+      return res.status(500).json({
+        message: 'Error al eliminar usuario'
+      });
+    }
+
+    // Eliminar de Auth
+    const { error: authError } = await supabase.auth.admin.deleteUser(id);
+
+    if (authError) {
+      console.error('Error al eliminar usuario de Auth:', authError);
+      // No fallamos la operación completa, solo registramos el error
+    }
+
+    res.json({ message: 'Usuario eliminado correctamente' });
   } catch (error) {
-    console.error('Error al eliminar usuario:', error);
+    console.error('Error en deleteUsuario:', error);
     res.status(500).json({
-      message: 'Error al eliminar usuario',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error en el servidor al eliminar usuario'
     });
   }
 };
 
+// Cambiar estado de un usuario (activar/desactivar)
+export const changeUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado } = req.body;
+
+    // Verificar que no se desactive a sí mismo
+    if (id === req.user.id && estado === false) {
+      return res.status(400).json({
+        message: 'No puedes desactivar tu propio usuario'
+      });
+    }
+
+    const { data: userData, error } = await supabase
+      .from('usuarios')
+      .update({ estado })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error al cambiar estado de usuario:', error);
+      return res.status(500).json({
+        message: 'Error al cambiar estado del usuario'
+      });
+    }
+
+    res.json(userData);
+  } catch (error) {
+    console.error('Error al cambiar estado de usuario:', error);
+    res.status(500).json({
+      message: 'Error en el servidor al cambiar estado del usuario'
+    });
+  }
+};
+
+// Restablecer contraseña de usuario
 export const resetPassword = async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
-
-    if (!newPassword) {
-      return res.status(400).json({
-        message: 'Nueva contraseña es requerida'
-      });
-    }
 
     // Actualizar contraseña en Auth
     const { error } = await supabase.auth.admin.updateUserById(id, {
@@ -239,9 +241,9 @@ export const resetPassword = async (req, res) => {
     });
 
     if (error) {
-      return res.status(400).json({
-        message: 'Error al restablecer contraseña',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      console.error('Error al restablecer contraseña:', error);
+      return res.status(500).json({
+        message: 'Error al restablecer contraseña'
       });
     }
 
@@ -249,8 +251,7 @@ export const resetPassword = async (req, res) => {
   } catch (error) {
     console.error('Error al restablecer contraseña:', error);
     res.status(500).json({
-      message: 'Error al restablecer contraseña',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Error en el servidor al restablecer contraseña'
     });
   }
 };
