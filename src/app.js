@@ -21,7 +21,7 @@ const app = express();
 app.use(cors({
   origin: [
     process.env.FRONTEND_URL || "http://localhost:5173",
-    "https://sistema-austech-frontend.onrender.com"
+    "https://sistema-austech-backend-l2ri.onrender.com"
   ],
   credentials: true
 }));
